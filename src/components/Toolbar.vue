@@ -1,17 +1,22 @@
 <script setup lang="ts">
-import { Hand, Moon, Pencil, Sun, Undo2, Redo2 } from 'lucide-vue-next'
+import { Hand, Moon, PenTool, Pencil, Sun, Undo2, Redo2 } from 'lucide-vue-next'
+import { useMediaQuery } from '@vueuse/core'
 
 type Tool = 'drag' | 'pen'
 type Mode = 'light' | 'dark'
 
+const isTouchScreen = useMediaQuery('(pointer: coarse)')
+
 const props = defineProps<{
   tool: Tool
   mode: Mode
+  penOnly: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'update:tool', value: Tool): void
   (e: 'update:mode', value: Mode): void
+  (e: 'update:penOnly', value: boolean): void
   (e: 'undo'): void
   (e: 'redo'): void
 }>()
@@ -68,6 +73,20 @@ const handleRedoClick = () => {
         :class="props.mode === 'dark' ? 'hover:bg-white/10 text-slate-200' : 'hover:bg-black/5 text-slate-700'"
         @click="handleRedoClick">
         <Redo2 class="w-4 h-4" aria-label="Redo" />
+      </button>
+
+      <button
+        v-if="isTouchScreen"
+        type="button"
+        class="inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors"
+        :class="[
+          props.mode === 'dark' ? 'hover:bg-white/10 text-slate-200' : 'hover:bg-black/5 text-slate-700',
+          props.penOnly ? (props.mode === 'dark' ? 'bg-white/10 ring-2 ring-violet-400' : 'bg-black/5 ring-2 ring-violet-500') : '',
+        ]"
+        :aria-label="props.penOnly ? 'Pen only (on)' : 'Pen only (off)'"
+        @click="emit('update:penOnly', !props.penOnly)"
+      >
+        <PenTool class="w-4 h-4" aria-hidden />
       </button>
 
       <button type="button" class="inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors"

@@ -11,6 +11,7 @@ const isDrawing = ref(false)
 const lastPoint = ref<Point | null>(null)
 const strokeManager = new StrokeManager()
 const currentTool = ref<Tool>('pen')
+const penOnly = ref(false)
 const viewOffset = ref<Point>({ x: 0, y: 0 })
 const isPanning = ref(false)
 const panStart = ref<Point | null>(null)
@@ -134,7 +135,7 @@ const handleRedo = () => {
   resizeAndDraw()
 }
 
-const getCanvasPoint = (event: MouseEvent): Point | null => {
+const getCanvasPoint = (event: { clientX: number; clientY: number }): Point | null => {
   const canvas = canvasRef.value
   if (!canvas) return null
 
@@ -168,8 +169,19 @@ const drawLineTo = (point: Point) => {
   lastPoint.value = point
 }
 
-const handleMouseDown = (event: MouseEvent) => {
+const handlePointerDown = (event: PointerEvent) => {
+  const canvas = canvasRef.value
+  if (!canvas) return
+
+  if (isDrawing.value || isPanning.value) return
+
+  if (event.pointerType === 'touch' || event.pointerType === 'pen') {
+    event.preventDefault()
+  }
+  canvas.setPointerCapture(event.pointerId)
+
   if (currentTool.value === 'pen') {
+    if (penOnly.value && event.pointerType !== 'pen') return
     const point = getCanvasPoint(event)
     if (!point) return
 
@@ -177,9 +189,6 @@ const handleMouseDown = (event: MouseEvent) => {
     strokeManager.beginStroke(point)
     lastPoint.value = point
   } else if (currentTool.value === 'drag') {
-    const canvas = canvasRef.value
-    if (!canvas) return
-
     const rect = canvas.getBoundingClientRect()
     const startX = event.clientX - rect.left
     const startY = event.clientY - rect.top
@@ -190,9 +199,10 @@ const handleMouseDown = (event: MouseEvent) => {
   }
 }
 
-const handleMouseMove = (event: MouseEvent) => {
+const handlePointerMove = (event: PointerEvent) => {
   if (currentTool.value === 'pen') {
     if (!isDrawing.value) return
+    if (penOnly.value && event.pointerType !== 'pen') return
 
     const point = getCanvasPoint(event)
     if (!point) return
@@ -221,7 +231,7 @@ const handleMouseMove = (event: MouseEvent) => {
   }
 }
 
-const handleMouseUp = () => {
+const endPointerInteraction = () => {
   if (isDrawing.value) {
     isDrawing.value = false
     lastPoint.value = null
@@ -231,6 +241,30 @@ const handleMouseUp = () => {
   isPanning.value = false
   panStart.value = null
   viewOffsetAtPanStart.value = null
+}
+
+const handlePointerUp = (event: PointerEvent) => {
+  const canvas = canvasRef.value
+  if (canvas) {
+    try {
+      canvas.releasePointerCapture(event.pointerId)
+    } catch {
+      // ignore if not captured
+    }
+  }
+  endPointerInteraction()
+}
+
+const handlePointerCancel = (event: PointerEvent) => {
+  const canvas = canvasRef.value
+  if (canvas) {
+    try {
+      canvas.releasePointerCapture(event.pointerId)
+    } catch {
+      // ignore if not captured
+    }
+  }
+  endPointerInteraction()
 }
 
 onMounted(() => {
@@ -245,10 +279,23 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="relative min-h-screen w-screen">
-    <canvas ref="canvasRef" class="w-screen h-screen block transition-colors"
-      :class="isDark ? 'bg-slate-900' : 'bg-slate-50'" @mousedown="handleMouseDown" @mousemove="handleMouseMove"
-      @mouseup="handleMouseUp" @mouseleave="handleMouseUp"></canvas>
+    <canvas
+      ref="canvasRef"
+      class="w-screen h-screen block touch-none transition-colors"
+      :class="isDark ? 'bg-slate-900' : 'bg-slate-50'"
+      @pointerdown="handlePointerDown"
+      @pointermove="handlePointerMove"
+      @pointerup="handlePointerUp"
+      @pointerleave="handlePointerUp"
+      @pointercancel="handlePointerCancel"
+    ></canvas>
 
-    <Toolbar v-model:tool="currentTool" v-model:mode="toolbarMode" @undo="handleUndo" @redo="handleRedo" />
+    <Toolbar
+      v-model:tool="currentTool"
+      v-model:mode="toolbarMode"
+      v-model:pen-only="penOnly"
+      @undo="handleUndo"
+      @redo="handleRedo"
+    />
   </div>
 </template>
