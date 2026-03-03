@@ -66,7 +66,21 @@ watch(isDark, () => {
   resizeAndDraw()
 })
 
-const strokeColor = computed(() => (isDark.value ? '#f1f5f9' : '#0f172a'))
+const themeColors = computed(() =>
+  isDark.value
+    ? {
+        stroke: '#f1f5f9',
+        pending: 'rgba(148,163,184,0.6)',
+        grid: '#192747',
+        brush: 'rgba(248,250,252,0.5)',
+      }
+    : {
+        stroke: '#0f172a',
+        pending: 'rgba(100,116,139,0.6)',
+        grid: '#eee',
+        brush: 'rgba(15,23,42,0.4)',
+      },
+)
 
 const scalePercent = computed(() => `${Math.round(viewScale.value * 100)}%`)
 
@@ -108,22 +122,18 @@ const resizeAndDraw = () => {
     viewOffset.value,
     viewScale.value,
   )
-  const gridColor = isDark.value ? '#192747' : '#eee'
-  drawGridInWorld(ctx, worldRect, GRID_SPACING, gridColor)
+  drawGridInWorld(ctx, worldRect, GRID_SPACING, themeColors.value.grid)
   drawStrokes(ctx, strokeManager.getStrokes(), {
     pendingIndexes: pendingDeleteIndexes.value,
-    strokeColor: strokeColor.value,
-    pendingColor: pendingDeleteColor.value,
+    strokeColor: themeColors.value.stroke,
+    pendingColor: themeColors.value.pending,
     defaultLineWidth: DEFAULT_STROKE_WIDTH,
   })
   if (isBrushing.value && brushCenter.value) {
     const worldRadius = brushRadius.value / viewScale.value
-    const brushStyle = isDark.value ? 'rgba(248,250,252,0.5)' : 'rgba(15,23,42,0.4)'
-    drawBrushCircle(ctx, brushCenter.value, worldRadius, brushStyle)
+    drawBrushCircle(ctx, brushCenter.value, worldRadius, themeColors.value.brush)
   }
 }
-
-const pendingDeleteColor = computed(() => (isDark.value ? 'rgba(148,163,184,0.6)' : 'rgba(100,116,139,0.6)'))
 
 const canUndo = ref(strokeManager.canUndo())
 const canRedo = ref(strokeManager.canRedo())
@@ -141,6 +151,26 @@ const handleUndo = () => {
 const handleRedo = () => {
   strokeManager.redo()
   resizeAndDraw()
+}
+
+const isInputAllowedForDrawing = (pointerType: PointerEvent['pointerType']): boolean => {
+  return !penOnly.value || pointerType === 'pen'
+}
+
+const startPanning = (start: Point): void => {
+  isPanning.value = true
+  panStart.value = { x: start.x, y: start.y }
+  viewOffsetAtPanStart.value = { ...viewOffset.value }
+}
+
+const safeReleasePointerCapture = (pointerId: number): void => {
+  const canvas = canvasRef.value
+  if (!canvas) return
+  try {
+    canvas.releasePointerCapture(pointerId)
+  } catch {
+    // ignore if not captured
+  }
 }
 
 const getCanvasOffsetPoint = (canvas: HTMLCanvasElement, event: { clientX: number; clientY: number }): Point => {
@@ -168,7 +198,7 @@ const drawLineTo = (point: Point) => {
 
   const dpr = window.devicePixelRatio || 1
   drawStrokeSegment(ctx, lastPoint.value, point, {
-    strokeColor: strokeColor.value,
+    strokeColor: themeColors.value.stroke,
     lineWidth: penWidth.value,
     dpr,
     offset: viewOffset.value,
@@ -178,40 +208,142 @@ const drawLineTo = (point: Point) => {
   lastPoint.value = point
 }
 
+const markBrushHitsAt = (centerPoint: Point): void => {
+  const worldRadius = brushRadius.value / viewScale.value
+  const strokes = strokeManager.getStrokes()
+  for (let i = 0; i < strokes.length; i++) {
+    if (strokeHitByBrush(strokes[i]!, centerPoint, worldRadius)) pendingDeleteIndexes.value.add(i)
+  }
+}
+
+const startBrushing = (point: Point): void => {
+  isBrushing.value = true
+  brushCenter.value = point
+  pendingDeleteIndexes.value = new Set()
+  markBrushHitsAt(point)
+  resizeAndDraw()
+}
+
+const startDrawing = (point: Point): void => {
+  isDrawing.value = true
+  strokeManager.beginStroke(point, penWidth.value)
+  lastPoint.value = point
+}
+
+const beginPinchFromTouchPoints = (): void => {
+  const pts = [...activeTouchPoints.value.values()]
+  const [p1, p2] = pts
+  if (!p1 || !p2) return
+  const dist = distance(p1, p2)
+  if (dist <= 1e-6) return
+  pinchStartDistance.value = dist
+  pinchStartScale.value = viewScale.value
+  pinchStartCenter.value = center(p1, p2)
+  pinchStartOffset.value = { ...viewOffset.value }
+  isPinching.value = true
+}
+
+const handleTouchPointerDown = (event: PointerEvent, point: Point, canvas: HTMLCanvasElement): boolean => {
+  if (event.pointerType !== 'touch') return false
+  activeTouchPoints.value.set(event.pointerId, point)
+  if (activeTouchPoints.value.size < 2) return false
+
+  const wasDrawing = isDrawing.value
+  endPointerInteraction()
+  if (wasDrawing) {
+    strokeManager.undo()
+    resizeAndDraw()
+  }
+  beginPinchFromTouchPoints()
+  event.preventDefault()
+  canvas.setPointerCapture(event.pointerId)
+  return true
+}
+
+const handleBrushPointerDown = (event: PointerEvent): boolean => {
+  if (currentTool.value !== 'brush') return false
+  if (!isInputAllowedForDrawing(event.pointerType)) return true
+  const pt = getCanvasPoint(event)
+  if (!pt) return true
+  startBrushing(pt)
+  return true
+}
+
+const handlePenPointerDown = (event: PointerEvent): boolean => {
+  if (currentTool.value !== 'pen') return false
+  if (!isInputAllowedForDrawing(event.pointerType)) return true
+  const point = getCanvasPoint(event)
+  if (!point) return true
+  startDrawing(point)
+  return true
+}
+
+const handlePinchMove = (event: PointerEvent): boolean => {
+  if (!(isPinching.value && event.pointerType === 'touch')) return false
+  const canvas = canvasRef.value
+  if (!canvas) return true
+
+  const p = getCanvasOffsetPoint(canvas, event)
+  activeTouchPoints.value.set(event.pointerId, p)
+  const pts = [...activeTouchPoints.value.values()]
+  if (pts.length !== 2 || !pts[0] || !pts[1]) return true
+  const newCenter = center(pts[0], pts[1])
+  const newDistance = distance(pts[0], pts[1])
+  if (pinchStartDistance.value < 1e-6) return true
+  const ratio = newDistance / pinchStartDistance.value
+  const newScale = Math.min(
+    MAX_SCALE,
+    Math.max(MIN_SCALE, pinchStartScale.value * ratio),
+  )
+  const c0 = pinchStartCenter.value
+  const o0 = pinchStartOffset.value
+  viewScale.value = newScale
+  viewOffset.value = {
+    x: newCenter.x - (newScale / pinchStartScale.value) * (c0.x - o0.x),
+    y: newCenter.y - (newScale / pinchStartScale.value) * (c0.y - o0.y),
+  }
+  resizeAndDraw()
+  return true
+}
+
+const handlePanningMove = (event: PointerEvent): boolean => {
+  if (!isPanning.value) return false
+  const canvas = canvasRef.value
+  if (!canvas || !panStart.value || !viewOffsetAtPanStart.value) return true
+
+  const p = getCanvasOffsetPoint(canvas, event)
+  const dx = p.x - panStart.value.x
+  const dy = p.y - panStart.value.y
+
+  viewOffset.value = {
+    x: viewOffsetAtPanStart.value.x + dx,
+    y: viewOffsetAtPanStart.value.y + dy,
+  }
+
+  resizeAndDraw()
+  return true
+}
+
+const handlePenDrawingMove = (event: PointerEvent): boolean => {
+  if (currentTool.value !== 'pen') return false
+  if (!isDrawing.value) return true
+  if (!isInputAllowedForDrawing(event.pointerType)) return true
+
+  const point = getCanvasPoint(event)
+  if (!point) return true
+
+  strokeManager.appendPoint(point)
+  drawLineTo(point)
+  return true
+}
+
 const handlePointerDown = (event: PointerEvent) => {
   const canvas = canvasRef.value
   if (!canvas) return
 
   const point = getCanvasOffsetPoint(canvas, event)
 
-  if (event.pointerType === 'touch') {
-    activeTouchPoints.value.set(event.pointerId, point)
-    if (activeTouchPoints.value.size >= 2) {
-      const wasDrawing = isDrawing.value
-      endPointerInteraction()
-      if (wasDrawing) {
-        strokeManager.undo()
-        resizeAndDraw()
-      }
-      const pts = [...activeTouchPoints.value.values()]
-      const [p1, p2] = pts
-      if (p1 && p2) {
-        const dist = distance(p1, p2)
-        if (dist > 1e-6) {
-          pinchStartDistance.value = dist
-          pinchStartScale.value = viewScale.value
-          pinchStartCenter.value = center(p1, p2)
-          pinchStartOffset.value = { ...viewOffset.value }
-          isPinching.value = true
-        }
-      }
-      if (event.pointerType === 'touch' || event.pointerType === 'pen') {
-        event.preventDefault()
-      }
-      canvas.setPointerCapture(event.pointerId)
-      return
-    }
-  }
+  if (handleTouchPointerDown(event, point, canvas)) return
 
   if (isDrawing.value || isPanning.value || isPinching.value) return
 
@@ -220,113 +352,35 @@ const handlePointerDown = (event: PointerEvent) => {
   }
   canvas.setPointerCapture(event.pointerId)
 
-  if (currentTool.value === 'brush') {
-    if (penOnly.value && event.pointerType !== 'pen') return
-    const pt = getCanvasPoint(event)
-    if (!pt) return
-    isBrushing.value = true
-    brushCenter.value = pt
-    pendingDeleteIndexes.value = new Set()
-    const worldRadius = brushRadius.value / viewScale.value
-    const strokes = strokeManager.getStrokes()
-    for (let i = 0; i < strokes.length; i++) {
-      if (strokeHitByBrush(strokes[i]!, pt, worldRadius)) pendingDeleteIndexes.value.add(i)
-    }
-    resizeAndDraw()
-    return
-  }
+  if (handleBrushPointerDown(event)) return
 
   // 中键按住拖动：无论当前工具为何都进入平移
   if (event.button === 1) {
     event.preventDefault()
-    isPanning.value = true
-    panStart.value = { x: point.x, y: point.y }
-    viewOffsetAtPanStart.value = { ...viewOffset.value }
+    startPanning(point)
     return
   }
 
-  if (currentTool.value === 'pen') {
-    if (penOnly.value && event.pointerType !== 'pen') return
-    const point = getCanvasPoint(event)
-    if (!point) return
-
-    isDrawing.value = true
-    strokeManager.beginStroke(point, penWidth.value)
-    lastPoint.value = point
-  } else if (currentTool.value === 'drag') {
-    isPanning.value = true
-    panStart.value = { x: point.x, y: point.y }
-    viewOffsetAtPanStart.value = { ...viewOffset.value }
+  if (handlePenPointerDown(event)) return
+  if (currentTool.value === 'drag') {
+    startPanning(point)
   }
 }
 
 const handlePointerMove = (event: PointerEvent) => {
-  if (isPinching.value && event.pointerType === 'touch') {
-    const canvas = canvasRef.value
-    if (!canvas) return
-    const p = getCanvasOffsetPoint(canvas, event)
-    activeTouchPoints.value.set(event.pointerId, p)
-    const pts = [...activeTouchPoints.value.values()]
-    if (pts.length !== 2 || !pts[0] || !pts[1]) return
-    const newCenter = center(pts[0], pts[1])
-    const newDistance = distance(pts[0], pts[1])
-    if (pinchStartDistance.value < 1e-6) return
-    const ratio = newDistance / pinchStartDistance.value
-    const newScale = Math.min(
-      MAX_SCALE,
-      Math.max(MIN_SCALE, pinchStartScale.value * ratio),
-    )
-    const c0 = pinchStartCenter.value
-    const o0 = pinchStartOffset.value
-    viewScale.value = newScale
-    viewOffset.value = {
-      x: newCenter.x - (newScale / pinchStartScale.value) * (c0.x - o0.x),
-      y: newCenter.y - (newScale / pinchStartScale.value) * (c0.y - o0.y),
-    }
-    resizeAndDraw()
-    return
-  }
-
-  if (isPanning.value) {
-    const canvas = canvasRef.value
-    if (!canvas || !panStart.value || !viewOffsetAtPanStart.value) return
-
-    const p = getCanvasOffsetPoint(canvas, event)
-    const dx = p.x - panStart.value.x
-    const dy = p.y - panStart.value.y
-
-    viewOffset.value = {
-      x: viewOffsetAtPanStart.value.x + dx,
-      y: viewOffsetAtPanStart.value.y + dy,
-    }
-
-    resizeAndDraw()
-    return
-  }
+  if (handlePinchMove(event)) return
+  if (handlePanningMove(event)) return
 
   if (isBrushing.value) {
     const pt = getCanvasPoint(event)
     if (!pt) return
     brushCenter.value = pt
-    const worldRadius = brushRadius.value / viewScale.value
-    const strokes = strokeManager.getStrokes()
-    for (let i = 0; i < strokes.length; i++) {
-      if (strokeHitByBrush(strokes[i]!, pt, worldRadius)) pendingDeleteIndexes.value.add(i)
-    }
+    markBrushHitsAt(pt)
     resizeAndDraw()
     return
   }
 
-  if (currentTool.value === 'pen') {
-    if (!isDrawing.value) return
-    if (penOnly.value && event.pointerType !== 'pen') return
-
-    const point = getCanvasPoint(event)
-    if (!point) return
-
-    strokeManager.appendPoint(point)
-    drawLineTo(point)
-  }
+  handlePenDrawingMove(event)
 }
 
 const endPointerInteraction = () => {
@@ -350,65 +404,29 @@ const endPointerInteraction = () => {
   viewOffsetAtPanStart.value = null
 }
 
-const handlePointerUp = (event: PointerEvent) => {
-  if (activeTouchPoints.value.has(event.pointerId)) {
+const handlePointerEnd = (event: PointerEvent) => {
+  const wasTouchPointer = activeTouchPoints.value.has(event.pointerId)
+  if (wasTouchPointer) {
     activeTouchPoints.value.delete(event.pointerId)
     if (activeTouchPoints.value.size < 2) {
       isPinching.value = false
     }
-    const canvas = canvasRef.value
-    if (canvas) {
-      try {
-        canvas.releasePointerCapture(event.pointerId)
-      } catch {
-        // ignore
-      }
-    }
+  }
+
+  safeReleasePointerCapture(event.pointerId)
+
+  if (wasTouchPointer) {
     if (activeTouchPoints.value.size === 0) {
       endPointerInteraction()
     }
     return
-  }
-  const canvas = canvasRef.value
-  if (canvas) {
-    try {
-      canvas.releasePointerCapture(event.pointerId)
-    } catch {
-      // ignore if not captured
-    }
   }
   endPointerInteraction()
 }
 
-const handlePointerCancel = (event: PointerEvent) => {
-  if (activeTouchPoints.value.has(event.pointerId)) {
-    activeTouchPoints.value.delete(event.pointerId)
-    if (activeTouchPoints.value.size < 2) {
-      isPinching.value = false
-    }
-    const canvas = canvasRef.value
-    if (canvas) {
-      try {
-        canvas.releasePointerCapture(event.pointerId)
-      } catch {
-        // ignore
-      }
-    }
-    if (activeTouchPoints.value.size === 0) {
-      endPointerInteraction()
-    }
-    return
-  }
-  const canvas = canvasRef.value
-  if (canvas) {
-    try {
-      canvas.releasePointerCapture(event.pointerId)
-    } catch {
-      // ignore if not captured
-    }
-  }
-  endPointerInteraction()
-}
+const handlePointerUp = (event: PointerEvent) => handlePointerEnd(event)
+
+const handlePointerCancel = (event: PointerEvent) => handlePointerEnd(event)
 
 const handleKeydown = (event: KeyboardEvent) => {
   if ((event.ctrlKey || event.metaKey) && !event.shiftKey) {
