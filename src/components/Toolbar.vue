@@ -8,12 +8,14 @@ type Mode = 'light' | 'dark'
 
 const isTouchScreen = useMediaQuery('(pointer: coarse)')
 const showBrushRadius = ref(false)
+const showPenWidth = ref(false)
 
 const props = defineProps<{
   tool: Tool
   mode: Mode
   penOnly: boolean
   brushRadius: number
+  penWidth: number
   canUndo: boolean
   canRedo: boolean
 }>()
@@ -23,12 +25,24 @@ const emit = defineEmits<{
   (e: 'update:mode', value: Mode): void
   (e: 'update:penOnly', value: boolean): void
   (e: 'update:brushRadius', value: number): void
+  (e: 'update:penWidth', value: number): void
   (e: 'undo'): void
   (e: 'redo'): void
 }>()
 
 const setTool = (tool: Tool) => {
+  if (tool === 'brush') showPenWidth.value = false
+  if (tool === 'pen') showBrushRadius.value = false
   emit('update:tool', tool)
+}
+
+const handlePenClick = () => {
+  if (props.tool === 'pen') {
+    showPenWidth.value = !showPenWidth.value
+  } else {
+    emit('update:tool', 'pen')
+    showPenWidth.value = false
+  }
 }
 
 const handleBrushClick = () => {
@@ -41,9 +55,14 @@ const handleBrushClick = () => {
 }
 
 const BRUSH_SIZE_OPTIONS = [10, 20, 30, 40, 50] as const
+const PEN_WIDTH_OPTIONS = [2, 4, 6, 8, 10] as const
 
 const setBrushRadius = (r: number) => {
   emit('update:brushRadius', r)
+}
+
+const setPenWidth = (w: number) => {
+  emit('update:penWidth', w)
 }
 
 const toggleMode = () => {
@@ -78,13 +97,39 @@ const handleRedoClick = () => {
         <Hand class="w-4 h-4" aria-label="Drag mode" />
       </button>
 
-      <button type="button" class="inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors"
-        :class="[
-          props.mode === 'dark' ? 'hover:bg-white/10 text-slate-200' : 'hover:bg-black/5 text-slate-700',
-          props.tool === 'pen' ? (props.mode === 'dark' ? 'bg-white/10 ring-2 ring-sky-400' : 'bg-black/5 ring-2 ring-sky-500') : '',
-        ]" @click="setTool('pen')">
-        <Pencil class="w-4 h-4" aria-label="Pen mode" />
-      </button>
+      <div class="relative inline-flex">
+        <button type="button" class="inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors"
+          :class="[
+            props.mode === 'dark' ? 'hover:bg-white/10 text-slate-200' : 'hover:bg-black/5 text-slate-700',
+            props.tool === 'pen' ? (props.mode === 'dark' ? 'bg-white/10 ring-2 ring-sky-400' : 'bg-black/5 ring-2 ring-sky-500') : '',
+          ]"
+          aria-label="Pen mode"
+          @click="handlePenClick"
+        >
+          <Pencil class="w-4 h-4" aria-hidden />
+        </button>
+        <div
+          v-if="showPenWidth && props.tool === 'pen'"
+          class="absolute left-1/2 top-full mt-4 -translate-x-1/2 rounded-lg border px-3 py-3 shadow-lg"
+          :class="props.mode === 'dark' ? 'bg-slate-800 border-white/20' : 'bg-white border-slate-200'"
+        >
+          <div class="flex flex-row items-center gap-3">
+            <button
+              v-for="w in PEN_WIDTH_OPTIONS"
+              :key="w"
+              type="button"
+              class="rounded-full flex-shrink-0 transition-[box-shadow,transform] hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-sky-500"
+              :class="[
+                props.mode === 'dark' ? 'bg-slate-200' : 'bg-slate-600',
+                props.penWidth === w ? (props.mode === 'dark' ? 'ring-2 ring-sky-400 ring-offset-2 ring-offset-slate-800' : 'ring-2 ring-sky-500 ring-offset-2 ring-offset-white') : '',
+              ]"
+              :style="{ width: `${w * 2 + 8}px`, height: `${w * 2 + 8}px`, minWidth: `${w * 2 + 8}px`, minHeight: `${w * 2 + 8}px` }"
+              :aria-label="`线宽 ${w}`"
+              @click="setPenWidth(w)"
+            />
+          </div>
+        </div>
+      </div>
 
       <div class="relative inline-flex">
         <button type="button" class="inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors"

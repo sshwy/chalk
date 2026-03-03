@@ -2,7 +2,7 @@
 import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 import { useColorMode } from '@vueuse/core'
 import Toolbar from './components/Toolbar.vue'
-import { StrokeManager, type Point, type Stroke } from '../chalk-app/index'
+import { DEFAULT_STROKE_WIDTH, StrokeManager, type Point, type Stroke } from '../chalk-app/index'
 
 type Tool = 'drag' | 'pen' | 'brush'
 
@@ -34,6 +34,9 @@ function distance(a: Point, b: Point): number {
 function center(a: Point, b: Point): Point {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
 }
+
+// 画笔：线宽（世界坐标），固定档位 2,4,6,8,10
+const penWidth = ref(DEFAULT_STROKE_WIDTH)
 
 // 刷子：半径（CSS px）、是否正在刷、当前中心（世界坐标）、本笔待删轨迹索引
 const brushRadius = ref(20)
@@ -179,13 +182,13 @@ const redrawStrokes = (ctx: CanvasRenderingContext2D) => {
   const pending = pendingDeleteIndexes.value
 
   ctx.save()
-  ctx.lineWidth = 2
   ctx.lineCap = 'round'
 
   for (let i = 0; i < strokes.length; i++) {
     const stroke = strokes[i]!
     const points = stroke.points
     if (!points || points.length < 2) continue
+    ctx.lineWidth = stroke.width ?? DEFAULT_STROKE_WIDTH
     ctx.strokeStyle = pending.has(i) ? pendingDeleteColor.value : strokeColor.value
     ctx.beginPath()
     ctx.moveTo(points[0]!.x, points[0]!.y)
@@ -258,7 +261,7 @@ const drawLineTo = (point: Point) => {
   ctx.translate(viewOffset.value.x, viewOffset.value.y)
   ctx.scale(viewScale.value, viewScale.value)
   ctx.strokeStyle = strokeColor.value
-  ctx.lineWidth = 2
+  ctx.lineWidth = penWidth.value
   ctx.lineCap = 'round'
 
   ctx.beginPath()
@@ -349,7 +352,7 @@ const handlePointerDown = (event: PointerEvent) => {
     if (!point) return
 
     isDrawing.value = true
-    strokeManager.beginStroke(point)
+    strokeManager.beginStroke(point, penWidth.value)
     lastPoint.value = point
   } else if (currentTool.value === 'drag') {
     const rect = canvas.getBoundingClientRect()
@@ -597,6 +600,7 @@ onBeforeUnmount(() => {
       v-model:mode="toolbarMode"
       v-model:pen-only="penOnly"
       v-model:brush-radius="brushRadius"
+      v-model:pen-width="penWidth"
       :can-undo="canUndo"
       :can-redo="canRedo"
       @undo="handleUndo"

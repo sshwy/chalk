@@ -1,11 +1,15 @@
 export type Point = { x: number; y: number }
 
+export const DEFAULT_STROKE_WIDTH = 2
+
 export type Stroke = {
   points: Point[]
+  /** 线宽（世界坐标），旧数据可能缺失，渲染时用 DEFAULT_STROKE_WIDTH 回退 */
+  width?: number
 }
 
 export type SerializedStrokeData = {
-  strokes: Stroke[]
+  strokes: Array<{ points: Point[]; width?: number }>
 }
 
 type UndoEntry =
@@ -40,8 +44,8 @@ export class StrokeManager {
     }
   }
 
-  beginStroke(startPoint: Point): void {
-    const stroke: Stroke = { points: [startPoint] }
+  beginStroke(startPoint: Point, width: number = DEFAULT_STROKE_WIDTH): void {
+    const stroke: Stroke = { points: [startPoint], width }
     this.strokes.push(stroke)
     this.currentStroke = stroke
     this.redoStack = []
@@ -149,6 +153,7 @@ export class StrokeManager {
     return {
       strokes: this.strokes.map((stroke) => ({
         points: stroke.points.map((p) => ({ x: p.x, y: p.y })),
+        width: stroke.width,
       })),
     }
   }
@@ -160,6 +165,7 @@ export class StrokeManager {
     }
     manager.strokes = data.strokes.map((stroke) => ({
       points: stroke.points.map((p) => ({ x: p.x, y: p.y })),
+      width: stroke.width != null ? stroke.width : DEFAULT_STROKE_WIDTH,
     }))
     return manager
   }
