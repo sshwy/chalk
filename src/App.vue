@@ -2,9 +2,9 @@
 import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 import { useColorMode } from '@vueuse/core'
 import Toolbar from './components/Toolbar.vue'
-import { StrokeManager, type Point } from '../chalk-app/index'
+import { StrokeManager, type Point, type Stroke } from '../chalk-app/index'
 
-type Tool = 'drag' | 'pen'
+type Tool = 'drag' | 'pen' | 'brush'
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 const isDrawing = ref(false)
@@ -33,6 +33,34 @@ function distance(a: Point, b: Point): number {
 }
 function center(a: Point, b: Point): Point {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+}
+
+// 刷子：半径（CSS px）、是否正在刷、当前中心（世界坐标）、本笔待删轨迹索引
+const brushRadius = ref(20)
+const isBrushing = ref(false)
+const brushCenter = ref<Point | null>(null)
+const pendingDeleteIndexes = ref<Set<number>>(new Set())
+
+/** 点到线段的最短距离（世界坐标） */
+function pointToSegmentDistance(p: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const len2 = dx * dx + dy * dy
+  if (len2 < 1e-12) return Math.hypot(p.x - a.x, p.y - a.y)
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
+  t = Math.max(0, Math.min(1, t))
+  const q = { x: a.x + t * dx, y: a.y + t * dy }
+  return Math.hypot(p.x - q.x, p.y - q.y)
+}
+
+/** 刷子圆（世界坐标）是否与轨迹相交：半径 = brushRadius / viewScale */
+function strokeHitByBrush(stroke: Stroke, center: Point, worldRadius: number): boolean {
+  const pts = stroke.points
+  if (!pts || pts.length < 2) return false
+  for (let i = 0; i < pts.length - 1; i++) {
+    if (pointToSegmentDistance(center, pts[i]!, pts[i + 1]!) <= worldRadius) return true
+  }
+  return false
 }
 
 const colorMode = useColorMode({
@@ -141,30 +169,47 @@ const resizeAndDraw = () => {
   )
   drawGridInWorld(ctx, worldRect, GRID_SPACING)
   redrawStrokes(ctx)
+  drawBrushCircle(ctx)
 }
+
+const pendingDeleteColor = computed(() => (isDark.value ? 'rgba(148,163,184,0.6)' : 'rgba(100,116,139,0.6)'))
 
 const redrawStrokes = (ctx: CanvasRenderingContext2D) => {
   const strokes = strokeManager.getStrokes()
-  if (!strokes.length) return
+  const pending = pendingDeleteIndexes.value
 
   ctx.save()
-  ctx.strokeStyle = strokeColor.value
   ctx.lineWidth = 2
   ctx.lineCap = 'round'
 
-  for (const stroke of strokes) {
+  for (let i = 0; i < strokes.length; i++) {
+    const stroke = strokes[i]!
     const points = stroke.points
     if (!points || points.length < 2) continue
-
+    ctx.strokeStyle = pending.has(i) ? pendingDeleteColor.value : strokeColor.value
     ctx.beginPath()
     ctx.moveTo(points[0]!.x, points[0]!.y)
-    for (let i = 1; i < points.length; i++) {
-      const p = points[i]!
+    for (let j = 1; j < points.length; j++) {
+      const p = points[j]!
       ctx.lineTo(p.x, p.y)
     }
     ctx.stroke()
   }
 
+  ctx.restore()
+}
+
+const drawBrushCircle = (ctx: CanvasRenderingContext2D) => {
+  if (!isBrushing.value || !brushCenter.value) return
+  const c = brushCenter.value
+  const worldRadius = brushRadius.value / viewScale.value
+  ctx.save()
+  ctx.strokeStyle = isDark.value ? 'rgba(248,250,252,0.5)' : 'rgba(15,23,42,0.4)'
+  ctx.lineWidth = 2
+  ctx.setLineDash([4, 4])
+  ctx.beginPath()
+  ctx.arc(c.x, c.y, worldRadius, 0, Math.PI * 2)
+  ctx.stroke()
   ctx.restore()
 }
 
@@ -262,6 +307,22 @@ const handlePointerDown = (event: PointerEvent) => {
   }
   canvas.setPointerCapture(event.pointerId)
 
+  if (currentTool.value === 'brush') {
+    if (penOnly.value && event.pointerType !== 'pen') return
+    const pt = getCanvasPoint(event)
+    if (!pt) return
+    isBrushing.value = true
+    brushCenter.value = pt
+    pendingDeleteIndexes.value = new Set()
+    const worldRadius = brushRadius.value / viewScale.value
+    const strokes = strokeManager.getStrokes()
+    for (let i = 0; i < strokes.length; i++) {
+      if (strokeHitByBrush(strokes[i]!, pt, worldRadius)) pendingDeleteIndexes.value.add(i)
+    }
+    resizeAndDraw()
+    return
+  }
+
   // 中键按住拖动：无论当前工具为何都进入平移
   if (event.button === 1) {
     event.preventDefault()
@@ -343,6 +404,19 @@ const handlePointerMove = (event: PointerEvent) => {
     return
   }
 
+  if (isBrushing.value) {
+    const pt = getCanvasPoint(event)
+    if (!pt) return
+    brushCenter.value = pt
+    const worldRadius = brushRadius.value / viewScale.value
+    const strokes = strokeManager.getStrokes()
+    for (let i = 0; i < strokes.length; i++) {
+      if (strokeHitByBrush(strokes[i]!, pt, worldRadius)) pendingDeleteIndexes.value.add(i)
+    }
+    resizeAndDraw()
+    return
+  }
+
   if (currentTool.value === 'pen') {
     if (!isDrawing.value) return
     if (penOnly.value && event.pointerType !== 'pen') return
@@ -356,6 +430,15 @@ const handlePointerMove = (event: PointerEvent) => {
 }
 
 const endPointerInteraction = () => {
+  if (isBrushing.value) {
+    const indexes = [...pendingDeleteIndexes.value].sort((a, b) => b - a)
+    if (indexes.length) strokeManager.removeStrokesByIndexes(indexes)
+    isBrushing.value = false
+    brushCenter.value = null
+    pendingDeleteIndexes.value = new Set()
+    resizeAndDraw()
+  }
+
   if (isDrawing.value) {
     isDrawing.value = false
     lastPoint.value = null
@@ -504,6 +587,7 @@ onBeforeUnmount(() => {
       v-model:tool="currentTool"
       v-model:mode="toolbarMode"
       v-model:pen-only="penOnly"
+      v-model:brush-radius="brushRadius"
       @undo="handleUndo"
       @redo="handleRedo"
     />
