@@ -16,17 +16,36 @@ function isRemoveEntry(e: UndoEntry): e is Extract<UndoEntry, { type: 'remove' }
   return e.type === 'remove'
 }
 
+export type StrokeManagerEvent = 'change'
+
 export class StrokeManager {
   private strokes: Stroke[] = []
   private undoStack: UndoEntry[] = []
   private redoStack: UndoEntry[] = []
   private currentStroke: Stroke | null = null
+  private changeListeners: Array<() => void> = []
+
+  private notifyChange(): void {
+    this.changeListeners.forEach((fn) => fn())
+  }
+
+  addEventListener(event: StrokeManagerEvent, listener: () => void): void {
+    if (event === 'change') this.changeListeners.push(listener)
+  }
+
+  removeEventListener(event: StrokeManagerEvent, listener: () => void): void {
+    if (event === 'change') {
+      const i = this.changeListeners.indexOf(listener)
+      if (i >= 0) this.changeListeners.splice(i, 1)
+    }
+  }
 
   beginStroke(startPoint: Point): void {
     const stroke: Stroke = { points: [startPoint] }
     this.strokes.push(stroke)
     this.currentStroke = stroke
     this.redoStack = []
+    this.notifyChange()
   }
 
   appendPoint(point: Point): void {
@@ -38,6 +57,7 @@ export class StrokeManager {
     if (this.currentStroke) {
       this.undoStack.push({ type: 'add', stroke: this.currentStroke })
       this.currentStroke = null
+      this.notifyChange()
     }
   }
 
@@ -46,6 +66,7 @@ export class StrokeManager {
     this.undoStack = []
     this.redoStack = []
     this.currentStroke = null
+    this.notifyChange()
   }
 
   removeStrokesByIndexes(indexes: number[], clearRedo = true): void {
@@ -67,6 +88,7 @@ export class StrokeManager {
     if (removed.length === 0) return
     this.undoStack.push({ type: 'remove', strokes: removed, indices })
     if (clearRedo) this.redoStack = []
+    this.notifyChange()
   }
 
   undo(): void {
@@ -79,6 +101,7 @@ export class StrokeManager {
         this.strokes.splice(indices[k]!, 0, strokes[k]!)
       }
       this.redoStack.push(entry)
+      this.notifyChange()
       return
     }
     const idx = this.strokes.indexOf(entry.stroke)
@@ -87,6 +110,7 @@ export class StrokeManager {
       if (this.currentStroke === entry.stroke) this.currentStroke = null
     }
     this.redoStack.push(entry)
+    this.notifyChange()
   }
 
   redo(): void {
@@ -101,14 +125,24 @@ export class StrokeManager {
         }
       }
       this.undoStack.push(entry)
+      this.notifyChange()
       return
     }
     this.strokes.push(entry.stroke)
     this.undoStack.push(entry)
+    this.notifyChange()
   }
 
   getStrokes(): readonly Stroke[] {
     return this.strokes
+  }
+
+  canUndo(): boolean {
+    return this.undoStack.length > 0
+  }
+
+  canRedo(): boolean {
+    return this.redoStack.length > 0
   }
 
   toJSON(): SerializedStrokeData {

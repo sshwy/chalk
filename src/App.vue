@@ -213,6 +213,14 @@ const drawBrushCircle = (ctx: CanvasRenderingContext2D) => {
   ctx.restore()
 }
 
+const canUndo = ref(strokeManager.canUndo())
+const canRedo = ref(strokeManager.canRedo())
+const onHistoryChange = () => {
+  canUndo.value = strokeManager.canUndo()
+  canRedo.value = strokeManager.canRedo()
+}
+strokeManager.addEventListener('change', onHistoryChange)
+
 const handleUndo = () => {
   strokeManager.undo()
   resizeAndDraw()
@@ -561,6 +569,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  strokeManager.removeEventListener('change', onHistoryChange)
   window.removeEventListener('resize', resizeAndDraw)
   window.removeEventListener('keydown', handleKeydown)
   const canvas = canvasRef.value
@@ -588,6 +597,8 @@ onBeforeUnmount(() => {
       v-model:mode="toolbarMode"
       v-model:pen-only="penOnly"
       v-model:brush-radius="brushRadius"
+      :can-undo="canUndo"
+      :can-redo="canRedo"
       @undo="handleUndo"
       @redo="handleRedo"
     />

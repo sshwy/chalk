@@ -14,6 +14,8 @@ const props = defineProps<{
   mode: Mode
   penOnly: boolean
   brushRadius: number
+  canUndo: boolean
+  canRedo: boolean
 }>()
 
 const emit = defineEmits<{
@@ -50,10 +52,12 @@ const toggleMode = () => {
 }
 
 const handleUndoClick = () => {
+  if (!props.canUndo) return
   emit('undo')
 }
 
 const handleRedoClick = () => {
+  if (!props.canRedo) return
   emit('redo')
 }
 </script>
@@ -116,16 +120,30 @@ const handleRedoClick = () => {
         </div>
       </div>
 
-      <button type="button" class="inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors"
-        :class="props.mode === 'dark' ? 'hover:bg-white/10 text-slate-200' : 'hover:bg-black/5 text-slate-700'"
-        @click="handleUndoClick">
-        <Undo2 class="w-4 h-4" aria-label="Undo" />
+      <button
+        type="button"
+        class="inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        :class="[
+          props.mode === 'dark' ? 'hover:bg-white/10 text-slate-200' : 'hover:bg-black/5 text-slate-700',
+        ]"
+        :disabled="!props.canUndo"
+        aria-label="Undo"
+        @click="handleUndoClick"
+      >
+        <Undo2 class="w-4 h-4" />
       </button>
 
-      <button type="button" class="inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors"
-        :class="props.mode === 'dark' ? 'hover:bg-white/10 text-slate-200' : 'hover:bg-black/5 text-slate-700'"
-        @click="handleRedoClick">
-        <Redo2 class="w-4 h-4" aria-label="Redo" />
+      <button
+        type="button"
+        class="inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        :class="[
+          props.mode === 'dark' ? 'hover:bg-white/10 text-slate-200' : 'hover:bg-black/5 text-slate-700',
+        ]"
+        :disabled="!props.canRedo"
+        aria-label="Redo"
+        @click="handleRedoClick"
+      >
+        <Redo2 class="w-4 h-4" />
       </button>
 
       <button
