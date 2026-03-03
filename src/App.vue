@@ -2,7 +2,21 @@
 import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
 import { useColorMode, useLocalStorage } from '@vueuse/core'
 import Toolbar from './components/Toolbar.vue'
-import { DEFAULT_STROKE_WIDTH, StrokeManager, type Point, type Stroke } from '../chalk-app/index'
+import {
+  DEFAULT_STROKE_WIDTH,
+  StrokeManager,
+  type Point,
+  distance,
+  center,
+  strokeHitByBrush,
+  getVisibleWorldRect,
+  screenToWorld,
+  zoomAtPoint,
+  drawGridInWorld,
+  drawStrokes,
+  drawBrushCircle,
+  drawStrokeSegment,
+} from '../chalk-app/index'
 
 type Tool = 'drag' | 'pen' | 'brush'
 
@@ -28,13 +42,6 @@ const pinchStartScale = ref(1)
 const pinchStartCenter = ref<Point>({ x: 0, y: 0 })
 const pinchStartOffset = ref<Point>({ x: 0, y: 0 })
 
-function distance(a: Point, b: Point): number {
-  return Math.hypot(b.x - a.x, b.y - a.y)
-}
-function center(a: Point, b: Point): Point {
-  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
-}
-
 // 画笔：线宽（世界坐标），固定档位 2,4,6,8,10
 const penWidth = ref(DEFAULT_STROKE_WIDTH)
 
@@ -43,28 +50,6 @@ const brushRadius = ref(20)
 const isBrushing = ref(false)
 const brushCenter = ref<Point | null>(null)
 const pendingDeleteIndexes = ref<Set<number>>(new Set())
-
-/** 点到线段的最短距离（世界坐标） */
-function pointToSegmentDistance(p: Point, a: Point, b: Point): number {
-  const dx = b.x - a.x
-  const dy = b.y - a.y
-  const len2 = dx * dx + dy * dy
-  if (len2 < 1e-12) return Math.hypot(p.x - a.x, p.y - a.y)
-  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2
-  t = Math.max(0, Math.min(1, t))
-  const q = { x: a.x + t * dx, y: a.y + t * dy }
-  return Math.hypot(p.x - q.x, p.y - q.y)
-}
-
-/** 刷子圆（世界坐标）是否与轨迹相交：半径 = brushRadius / viewScale */
-function strokeHitByBrush(stroke: Stroke, center: Point, worldRadius: number): boolean {
-  const pts = stroke.points
-  if (!pts || pts.length < 2) return false
-  for (let i = 0; i < pts.length - 1; i++) {
-    if (pointToSegmentDistance(center, pts[i]!, pts[i + 1]!) <= worldRadius) return true
-  }
-  return false
-}
 
 const colorMode = useColorMode({
   initialValue: 'light',
@@ -85,54 +70,7 @@ const strokeColor = computed(() => (isDark.value ? '#f1f5f9' : '#0f172a'))
 
 const scalePercent = computed(() => `${Math.round(viewScale.value * 100)}%`)
 
-/** 世界坐标系下可见矩形（用于网格绘制） */
-const getVisibleWorldRect = (
-  width: number,
-  height: number,
-  offset: Point,
-  scale: number,
-) => {
-  return {
-    left: -offset.x / scale,
-    top: -offset.y / scale,
-    right: (width - offset.x) / scale,
-    bottom: (height - offset.y) / scale,
-  }
-}
-
 const GRID_SPACING = 20
-
-const drawGridInWorld = (
-  ctx: CanvasRenderingContext2D,
-  worldRect: { left: number; top: number; right: number; bottom: number },
-  spacing: number,
-) => {
-  const gridColor = isDark.value ? '#192747' : '#eee'
-
-  ctx.save()
-  ctx.strokeStyle = gridColor
-  ctx.lineWidth = 1
-  ctx.beginPath()
-
-  const iMin = Math.floor(worldRect.left / spacing)
-  const iMax = Math.ceil(worldRect.right / spacing)
-  const jMin = Math.floor(worldRect.top / spacing)
-  const jMax = Math.ceil(worldRect.bottom / spacing)
-
-  for (let i = iMin; i <= iMax; i++) {
-    const x = i * spacing + 0.5
-    ctx.moveTo(x, worldRect.top)
-    ctx.lineTo(x, worldRect.bottom)
-  }
-  for (let j = jMin; j <= jMax; j++) {
-    const y = j * spacing + 0.5
-    ctx.moveTo(worldRect.left, y)
-    ctx.lineTo(worldRect.right, y)
-  }
-
-  ctx.stroke()
-  ctx.restore()
-}
 
 const resizeAndDraw = () => {
   const canvas = canvasRef.value
@@ -170,51 +108,22 @@ const resizeAndDraw = () => {
     viewOffset.value,
     viewScale.value,
   )
-  drawGridInWorld(ctx, worldRect, GRID_SPACING)
-  redrawStrokes(ctx)
-  drawBrushCircle(ctx)
+  const gridColor = isDark.value ? '#192747' : '#eee'
+  drawGridInWorld(ctx, worldRect, GRID_SPACING, gridColor)
+  drawStrokes(ctx, strokeManager.getStrokes(), {
+    pendingIndexes: pendingDeleteIndexes.value,
+    strokeColor: strokeColor.value,
+    pendingColor: pendingDeleteColor.value,
+    defaultLineWidth: DEFAULT_STROKE_WIDTH,
+  })
+  if (isBrushing.value && brushCenter.value) {
+    const worldRadius = brushRadius.value / viewScale.value
+    const brushStyle = isDark.value ? 'rgba(248,250,252,0.5)' : 'rgba(15,23,42,0.4)'
+    drawBrushCircle(ctx, brushCenter.value, worldRadius, brushStyle)
+  }
 }
 
 const pendingDeleteColor = computed(() => (isDark.value ? 'rgba(148,163,184,0.6)' : 'rgba(100,116,139,0.6)'))
-
-const redrawStrokes = (ctx: CanvasRenderingContext2D) => {
-  const strokes = strokeManager.getStrokes()
-  const pending = pendingDeleteIndexes.value
-
-  ctx.save()
-  ctx.lineCap = 'round'
-
-  for (let i = 0; i < strokes.length; i++) {
-    const stroke = strokes[i]!
-    const points = stroke.points
-    if (!points || points.length < 2) continue
-    ctx.lineWidth = stroke.width ?? DEFAULT_STROKE_WIDTH
-    ctx.strokeStyle = pending.has(i) ? pendingDeleteColor.value : strokeColor.value
-    ctx.beginPath()
-    ctx.moveTo(points[0]!.x, points[0]!.y)
-    for (let j = 1; j < points.length; j++) {
-      const p = points[j]!
-      ctx.lineTo(p.x, p.y)
-    }
-    ctx.stroke()
-  }
-
-  ctx.restore()
-}
-
-const drawBrushCircle = (ctx: CanvasRenderingContext2D) => {
-  if (!isBrushing.value || !brushCenter.value) return
-  const c = brushCenter.value
-  const worldRadius = brushRadius.value / viewScale.value
-  ctx.save()
-  ctx.strokeStyle = isDark.value ? 'rgba(248,250,252,0.5)' : 'rgba(15,23,42,0.4)'
-  ctx.lineWidth = 2
-  ctx.setLineDash([4, 4])
-  ctx.beginPath()
-  ctx.arc(c.x, c.y, worldRadius, 0, Math.PI * 2)
-  ctx.stroke()
-  ctx.restore()
-}
 
 const canUndo = ref(strokeManager.canUndo())
 const canRedo = ref(strokeManager.canRedo())
@@ -239,13 +148,7 @@ const getCanvasPoint = (event: { clientX: number; clientY: number }): Point | nu
   if (!canvas) return null
 
   const rect = canvas.getBoundingClientRect()
-  const sx = event.clientX - rect.left
-  const sy = event.clientY - rect.top
-  const scale = viewScale.value
-  return {
-    x: (sx - viewOffset.value.x) / scale,
-    y: (sy - viewOffset.value.y) / scale,
-  }
+  return screenToWorld(event.clientX, event.clientY, rect, viewOffset.value, viewScale.value)
 }
 
 const drawLineTo = (point: Point) => {
@@ -256,19 +159,13 @@ const drawLineTo = (point: Point) => {
   if (!ctx || !lastPoint.value) return
 
   const dpr = window.devicePixelRatio || 1
-  ctx.save()
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  ctx.translate(viewOffset.value.x, viewOffset.value.y)
-  ctx.scale(viewScale.value, viewScale.value)
-  ctx.strokeStyle = strokeColor.value
-  ctx.lineWidth = penWidth.value
-  ctx.lineCap = 'round'
-
-  ctx.beginPath()
-  ctx.moveTo(lastPoint.value.x, lastPoint.value.y)
-  ctx.lineTo(point.x, point.y)
-  ctx.stroke()
-  ctx.restore()
+  drawStrokeSegment(ctx, lastPoint.value, point, {
+    strokeColor: strokeColor.value,
+    lineWidth: penWidth.value,
+    dpr,
+    offset: viewOffset.value,
+    scale: viewScale.value,
+  })
 
   lastPoint.value = point
 }
@@ -545,19 +442,21 @@ const handleWheel = (event: WheelEvent) => {
   const rect = canvas.getBoundingClientRect()
   const sx = event.clientX - rect.left
   const sy = event.clientY - rect.top
-  const scale = viewScale.value
-  const newScale = Math.min(
+  const { scale: newScale, offset: newOffset } = zoomAtPoint(
+    sx,
+    sy,
+    event.deltaY,
+    viewScale.value,
+    viewOffset.value,
+    MIN_SCALE,
     MAX_SCALE,
-    Math.max(MIN_SCALE, scale * (1 - event.deltaY * ZOOM_SENSITIVITY)),
+    ZOOM_SENSITIVITY,
   )
-  if (newScale === scale) return
-
-  const ratio = newScale / scale
-  viewOffset.value = {
-    x: sx - ratio * (sx - viewOffset.value.x),
-    y: sy - ratio * (sy - viewOffset.value.y),
+  if (newScale === viewScale.value && newOffset.x === viewOffset.value.x && newOffset.y === viewOffset.value.y) {
+    return
   }
   viewScale.value = newScale
+  viewOffset.value = newOffset
   resizeAndDraw()
 }
 
