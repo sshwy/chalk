@@ -427,6 +427,19 @@ const handlePointerCancel = (event: PointerEvent) => {
   endPointerInteraction()
 }
 
+const handleKeydown = (event: KeyboardEvent) => {
+  if ((event.ctrlKey || event.metaKey) && !event.shiftKey) {
+    const key = event.key.toLowerCase()
+    if (key === 'z') {
+      event.preventDefault()
+      handleUndo()
+    } else if (key === 'y') {
+      event.preventDefault()
+      handleRedo()
+    }
+  }
+}
+
 const ZOOM_SENSITIVITY = 0.002
 
 const handleWheel = (event: WheelEvent) => {
@@ -457,6 +470,7 @@ const handleWheel = (event: WheelEvent) => {
 onMounted(() => {
   resizeAndDraw()
   window.addEventListener('resize', resizeAndDraw)
+  window.addEventListener('keydown', handleKeydown)
   const canvas = canvasRef.value
   if (canvas) {
     canvas.addEventListener('wheel', handleWheel, { passive: false })
@@ -465,6 +479,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeAndDraw)
+  window.removeEventListener('keydown', handleKeydown)
   const canvas = canvasRef.value
   if (canvas) {
     canvas.removeEventListener('wheel', handleWheel)
@@ -494,7 +509,7 @@ onBeforeUnmount(() => {
     />
 
     <div
-      class="pointer-events-none fixed bottom-4 right-4 z-10 rounded-full px-3 py-1.5 text-sm tabular-nums backdrop-blur border"
+      class="pointer-events-none select-none fixed bottom-4 right-4 z-10 rounded-full px-3 py-1.5 text-sm tabular-nums backdrop-blur border"
       :class="
         isDark
           ? 'bg-slate-900/70 border-white/20 text-slate-200'
