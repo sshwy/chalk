@@ -143,6 +143,14 @@ const handleRedo = () => {
   resizeAndDraw()
 }
 
+const getCanvasOffsetPoint = (canvas: HTMLCanvasElement, event: { clientX: number; clientY: number }): Point => {
+  const rect = canvas.getBoundingClientRect()
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
+  }
+}
+
 const getCanvasPoint = (event: { clientX: number; clientY: number }): Point | null => {
   const canvas = canvasRef.value
   if (!canvas) return null
@@ -174,10 +182,7 @@ const handlePointerDown = (event: PointerEvent) => {
   const canvas = canvasRef.value
   if (!canvas) return
 
-  const rect = canvas.getBoundingClientRect()
-  const canvasX = event.clientX - rect.left
-  const canvasY = event.clientY - rect.top
-  const point: Point = { x: canvasX, y: canvasY }
+  const point = getCanvasOffsetPoint(canvas, event)
 
   if (event.pointerType === 'touch') {
     activeTouchPoints.value.set(event.pointerId, point)
@@ -234,11 +239,8 @@ const handlePointerDown = (event: PointerEvent) => {
   // 中键按住拖动：无论当前工具为何都进入平移
   if (event.button === 1) {
     event.preventDefault()
-    const rect = canvas.getBoundingClientRect()
-    const startX = event.clientX - rect.left
-    const startY = event.clientY - rect.top
     isPanning.value = true
-    panStart.value = { x: startX, y: startY }
+    panStart.value = { x: point.x, y: point.y }
     viewOffsetAtPanStart.value = { ...viewOffset.value }
     return
   }
@@ -252,12 +254,8 @@ const handlePointerDown = (event: PointerEvent) => {
     strokeManager.beginStroke(point, penWidth.value)
     lastPoint.value = point
   } else if (currentTool.value === 'drag') {
-    const rect = canvas.getBoundingClientRect()
-    const startX = event.clientX - rect.left
-    const startY = event.clientY - rect.top
-
     isPanning.value = true
-    panStart.value = { x: startX, y: startY }
+    panStart.value = { x: point.x, y: point.y }
     viewOffsetAtPanStart.value = { ...viewOffset.value }
   }
 }
@@ -266,11 +264,8 @@ const handlePointerMove = (event: PointerEvent) => {
   if (isPinching.value && event.pointerType === 'touch') {
     const canvas = canvasRef.value
     if (!canvas) return
-    const rect = canvas.getBoundingClientRect()
-    activeTouchPoints.value.set(event.pointerId, {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
-    })
+    const p = getCanvasOffsetPoint(canvas, event)
+    activeTouchPoints.value.set(event.pointerId, p)
     const pts = [...activeTouchPoints.value.values()]
     if (pts.length !== 2 || !pts[0] || !pts[1]) return
     const newCenter = center(pts[0], pts[1])
@@ -296,12 +291,9 @@ const handlePointerMove = (event: PointerEvent) => {
     const canvas = canvasRef.value
     if (!canvas || !panStart.value || !viewOffsetAtPanStart.value) return
 
-    const rect = canvas.getBoundingClientRect()
-    const currentX = event.clientX - rect.left
-    const currentY = event.clientY - rect.top
-
-    const dx = currentX - panStart.value.x
-    const dy = currentY - panStart.value.y
+    const p = getCanvasOffsetPoint(canvas, event)
+    const dx = p.x - panStart.value.x
+    const dy = p.y - panStart.value.y
 
     viewOffset.value = {
       x: viewOffsetAtPanStart.value.x + dx,
@@ -439,12 +431,10 @@ const handleWheel = (event: WheelEvent) => {
 
   event.preventDefault()
 
-  const rect = canvas.getBoundingClientRect()
-  const sx = event.clientX - rect.left
-  const sy = event.clientY - rect.top
+  const p = getCanvasOffsetPoint(canvas, event)
   const { scale: newScale, offset: newOffset } = zoomAtPoint(
-    sx,
-    sy,
+    p.x,
+    p.y,
     event.deltaY,
     viewScale.value,
     viewOffset.value,
