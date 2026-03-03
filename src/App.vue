@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue'
-import { Hand, Pencil, Undo2, Redo2 } from 'lucide-vue-next'
+import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
+import { useColorMode } from '@vueuse/core'
+import Toolbar from './components/Toolbar.vue'
 import { StrokeManager, type Point } from '../chalk-app/index'
 
 type Tool = 'drag' | 'pen'
@@ -15,6 +16,23 @@ const isPanning = ref(false)
 const panStart = ref<Point | null>(null)
 const viewOffsetAtPanStart = ref<Point | null>(null)
 
+const colorMode = useColorMode({
+  initialValue: 'light',
+})
+const isDark = computed(() => colorMode.value === 'dark')
+const toolbarMode = computed<'light' | 'dark'>({
+  get: () => (isDark.value ? 'dark' : 'light'),
+  set: (value) => {
+    colorMode.value = value
+  },
+})
+
+watch(isDark, () => {
+  resizeAndDraw()
+})
+
+const strokeColor = computed(() => (isDark.value ? '#f1f5f9' : '#0f172a'))
+
 const drawGridWithOffset = (
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -25,8 +43,10 @@ const drawGridWithOffset = (
   const normalizedOffsetX = ((offset.x % spacing) + spacing) % spacing
   const normalizedOffsetY = ((offset.y % spacing) + spacing) % spacing
 
+  const strokeColor = isDark.value ? '#192747' : '#eee'
+
   ctx.save()
-  ctx.strokeStyle = '#e5e7eb'
+  ctx.strokeStyle = strokeColor
   ctx.lineWidth = 1
   ctx.beginPath()
 
@@ -84,7 +104,7 @@ const redrawStrokes = (ctx: CanvasRenderingContext2D) => {
   if (!strokes.length) return
 
   ctx.save()
-  ctx.strokeStyle = '#000000'
+  ctx.strokeStyle = strokeColor.value
   ctx.lineWidth = 2
   ctx.lineCap = 'round'
 
@@ -135,7 +155,7 @@ const drawLineTo = (point: Point) => {
 
   ctx.save()
   ctx.translate(viewOffset.value.x, viewOffset.value.y)
-  ctx.strokeStyle = '#000000'
+  ctx.strokeStyle = strokeColor.value
   ctx.lineWidth = 2
   ctx.lineCap = 'round'
 
@@ -225,53 +245,10 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="relative min-h-screen w-screen">
-    <canvas
-      ref="canvasRef"
-      class="w-screen h-screen block"
-      @mousedown="handleMouseDown"
-      @mousemove="handleMouseMove"
-      @mouseup="handleMouseUp"
-      @mouseleave="handleMouseUp"
-    ></canvas>
+    <canvas ref="canvasRef" class="w-screen h-screen block transition-colors"
+      :class="isDark ? 'bg-slate-900' : 'bg-slate-50'" @mousedown="handleMouseDown" @mousemove="handleMouseMove"
+      @mouseup="handleMouseUp" @mouseleave="handleMouseUp"></canvas>
 
-    <div class="pointer-events-none fixed top-4 inset-x-0 flex justify-center z-10">
-      <div
-        class="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-white/70 dark:bg-slate-900/70 backdrop-blur shadow-lg border border-white/40 px-3 py-2"
-      >
-        <button
-          type="button"
-          class="inline-flex items-center justify-center w-9 h-9 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
-          :class="currentTool === 'drag' ? 'bg-black/5 dark:bg-white/10 ring-2 ring-sky-500' : ''"
-          @click="currentTool = 'drag'"
-        >
-          <Hand class="w-4 h-4" aria-label="Drag mode" />
-        </button>
-
-        <button
-          type="button"
-          class="inline-flex items-center justify-center w-9 h-9 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
-          :class="currentTool === 'pen' ? 'bg-black/5 dark:bg-white/10 ring-2 ring-sky-500' : ''"
-          @click="currentTool = 'pen'"
-        >
-          <Pencil class="w-4 h-4" aria-label="Pen mode" />
-        </button>
-
-        <button
-          type="button"
-          class="inline-flex items-center justify-center w-9 h-9 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
-          @click="handleUndo"
-        >
-          <Undo2 class="w-4 h-4" aria-label="Undo" />
-        </button>
-
-        <button
-          type="button"
-          class="inline-flex items-center justify-center w-9 h-9 rounded-full hover:bg-black/5 dark:hover:bg-white/10 transition-colors"
-          @click="handleRedo"
-        >
-          <Redo2 class="w-4 h-4" aria-label="Redo" />
-        </button>
-      </div>
-    </div>
+    <Toolbar v-model:tool="currentTool" v-model:mode="toolbarMode" @undo="handleUndo" @redo="handleRedo" />
   </div>
 </template>
