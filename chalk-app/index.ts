@@ -1,3 +1,5 @@
+export * from './strokes'
+
 export interface DrawGridOptions {
   spacing?: number
   strokeStyle?: string

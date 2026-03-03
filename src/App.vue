@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue'
-import { drawGrid } from '../chalk-app/index'
+import { drawGrid, StrokeManager, type Point } from '../chalk-app/index'
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
+const isDrawing = ref(false)
+const lastPoint = ref<Point | null>(null)
+const strokeManager = new StrokeManager()
 
 const resizeAndDraw = () => {
   const canvas = canvasRef.value
@@ -27,6 +30,86 @@ const resizeAndDraw = () => {
 
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   drawGrid(ctx, rect.width, rect.height, { spacing: 20 })
+  redrawStrokes(ctx)
+}
+
+const redrawStrokes = (ctx: CanvasRenderingContext2D) => {
+  const strokes = strokeManager.getStrokes()
+  if (!strokes.length) return
+
+  ctx.save()
+  ctx.strokeStyle = '#000000'
+  ctx.lineWidth = 2
+  ctx.lineCap = 'round'
+
+  for (const stroke of strokes) {
+    const points = stroke.points
+    if (!points || points.length < 2) continue
+
+    ctx.beginPath()
+    ctx.moveTo(points[0]!.x, points[0]!.y)
+    for (let i = 1; i < points.length; i++) {
+      const p = points[i]!
+      ctx.lineTo(p.x, p.y)
+    }
+    ctx.stroke()
+  }
+
+  ctx.restore()
+}
+
+const getCanvasPoint = (event: MouseEvent): Point | null => {
+  const canvas = canvasRef.value
+  if (!canvas) return null
+
+  const rect = canvas.getBoundingClientRect()
+  return {
+    x: event.clientX - rect.left,
+    y: event.clientY - rect.top,
+  }
+}
+
+const drawLineTo = (point: Point) => {
+  const canvas = canvasRef.value
+  if (!canvas) return
+
+  const ctx = canvas.getContext('2d')
+  if (!ctx || !lastPoint.value) return
+
+  ctx.strokeStyle = '#000000'
+  ctx.lineWidth = 2
+  ctx.lineCap = 'round'
+
+  ctx.beginPath()
+  ctx.moveTo(lastPoint.value.x, lastPoint.value.y)
+  ctx.lineTo(point.x, point.y)
+  ctx.stroke()
+
+  lastPoint.value = point
+}
+
+const handleMouseDown = (event: MouseEvent) => {
+  const point = getCanvasPoint(event)
+  if (!point) return
+
+  isDrawing.value = true
+  strokeManager.beginStroke(point)
+  lastPoint.value = point
+}
+
+const handleMouseMove = (event: MouseEvent) => {
+  if (!isDrawing.value) return
+  const point = getCanvasPoint(event)
+  if (!point) return
+
+  strokeManager.appendPoint(point)
+  drawLineTo(point)
+}
+
+const handleMouseUp = () => {
+  isDrawing.value = false
+  lastPoint.value = null
+  strokeManager.endStroke()
 }
 
 onMounted(() => {
@@ -41,6 +124,13 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="min-h-screen w-screen">
-    <canvas ref="canvasRef" class="w-screen h-screen block"></canvas>
+    <canvas
+      ref="canvasRef"
+      class="w-screen h-screen block"
+      @mousedown="handleMouseDown"
+      @mousemove="handleMouseMove"
+      @mouseup="handleMouseUp"
+      @mouseleave="handleMouseUp"
+    ></canvas>
   </div>
 </template>
