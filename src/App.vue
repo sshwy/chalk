@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, computed, watch } from 'vue'
-import { useColorMode } from '@vueuse/core'
+import { useColorMode, useLocalStorage } from '@vueuse/core'
 import Toolbar from './components/Toolbar.vue'
 import { DEFAULT_STROKE_WIDTH, StrokeManager, type Point, type Stroke } from '../chalk-app/index'
 
@@ -11,7 +11,7 @@ const isDrawing = ref(false)
 const lastPoint = ref<Point | null>(null)
 const strokeManager = new StrokeManager()
 const currentTool = ref<Tool>('pen')
-const penOnly = ref(false)
+const penOnly = useLocalStorage<boolean>('chalk:pen-only', false)
 const viewOffset = ref<Point>({ x: 0, y: 0 })
 const viewScale = ref(1)
 const MIN_SCALE = 0.25
