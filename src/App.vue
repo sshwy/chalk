@@ -13,6 +13,9 @@ const strokeManager = new StrokeManager()
 const currentTool = ref<Tool>('pen')
 const penOnly = ref(false)
 const viewOffset = ref<Point>({ x: 0, y: 0 })
+const viewScale = ref(1)
+const MIN_SCALE = 0.25
+const MAX_SCALE = 4
 const isPanning = ref(false)
 const panStart = ref<Point | null>(null)
 const viewOffsetAtPanStart = ref<Point | null>(null)
@@ -34,31 +37,51 @@ watch(isDark, () => {
 
 const strokeColor = computed(() => (isDark.value ? '#f1f5f9' : '#0f172a'))
 
-const drawGridWithOffset = (
-  ctx: CanvasRenderingContext2D,
+const scalePercent = computed(() => `${Math.round(viewScale.value * 100)}%`)
+
+/** 世界坐标系下可见矩形（用于网格绘制） */
+const getVisibleWorldRect = (
   width: number,
   height: number,
-  spacing: number,
   offset: Point,
+  scale: number,
 ) => {
-  const normalizedOffsetX = ((offset.x % spacing) + spacing) % spacing
-  const normalizedOffsetY = ((offset.y % spacing) + spacing) % spacing
+  return {
+    left: -offset.x / scale,
+    top: -offset.y / scale,
+    right: (width - offset.x) / scale,
+    bottom: (height - offset.y) / scale,
+  }
+}
 
-  const strokeColor = isDark.value ? '#192747' : '#eee'
+const GRID_SPACING = 20
+
+const drawGridInWorld = (
+  ctx: CanvasRenderingContext2D,
+  worldRect: { left: number; top: number; right: number; bottom: number },
+  spacing: number,
+) => {
+  const gridColor = isDark.value ? '#192747' : '#eee'
 
   ctx.save()
-  ctx.strokeStyle = strokeColor
+  ctx.strokeStyle = gridColor
   ctx.lineWidth = 1
   ctx.beginPath()
 
-  // 从视口外一格开始，确保拖动后边缘仍被网格覆盖。
-  for (let x = normalizedOffsetX - spacing + 0.5; x <= width + spacing; x += spacing) {
-    ctx.moveTo(x, 0)
-    ctx.lineTo(x, height)
+  const iMin = Math.floor(worldRect.left / spacing)
+  const iMax = Math.ceil(worldRect.right / spacing)
+  const jMin = Math.floor(worldRect.top / spacing)
+  const jMax = Math.ceil(worldRect.bottom / spacing)
+
+  for (let i = iMin; i <= iMax; i++) {
+    const x = i * spacing + 0.5
+    ctx.moveTo(x, worldRect.top)
+    ctx.lineTo(x, worldRect.bottom)
   }
-  for (let y = normalizedOffsetY - spacing + 0.5; y <= height + spacing; y += spacing) {
-    ctx.moveTo(0, y)
-    ctx.lineTo(width, y)
+  for (let j = jMin; j <= jMax; j++) {
+    const y = j * spacing + 0.5
+    ctx.moveTo(worldRect.left, y)
+    ctx.lineTo(worldRect.right, y)
   }
 
   ctx.stroke()
@@ -90,14 +113,19 @@ const resizeAndDraw = () => {
   ctx.setTransform(1, 0, 0, 1, 0, 0)
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-  // 再应用 DPR 缩放和视图偏移，让网格和笔画一起移动
+  // 应用 DPR，再应用视图平移与缩放，使网格和笔画在同一世界坐标系下
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-  drawGridWithOffset(ctx, rect.width, rect.height, 20, viewOffset.value)
-
-  ctx.save()
   ctx.translate(viewOffset.value.x, viewOffset.value.y)
+  ctx.scale(viewScale.value, viewScale.value)
+
+  const worldRect = getVisibleWorldRect(
+    rect.width,
+    rect.height,
+    viewOffset.value,
+    viewScale.value,
+  )
+  drawGridInWorld(ctx, worldRect, GRID_SPACING)
   redrawStrokes(ctx)
-  ctx.restore()
 }
 
 const redrawStrokes = (ctx: CanvasRenderingContext2D) => {
@@ -140,10 +168,12 @@ const getCanvasPoint = (event: { clientX: number; clientY: number }): Point | nu
   if (!canvas) return null
 
   const rect = canvas.getBoundingClientRect()
-  const offset = viewOffset.value
+  const sx = event.clientX - rect.left
+  const sy = event.clientY - rect.top
+  const scale = viewScale.value
   return {
-    x: event.clientX - rect.left - offset.x,
-    y: event.clientY - rect.top - offset.y,
+    x: (sx - viewOffset.value.x) / scale,
+    y: (sy - viewOffset.value.y) / scale,
   }
 }
 
@@ -154,8 +184,11 @@ const drawLineTo = (point: Point) => {
   const ctx = canvas.getContext('2d')
   if (!ctx || !lastPoint.value) return
 
+  const dpr = window.devicePixelRatio || 1
   ctx.save()
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   ctx.translate(viewOffset.value.x, viewOffset.value.y)
+  ctx.scale(viewScale.value, viewScale.value)
   ctx.strokeStyle = strokeColor.value
   ctx.lineWidth = 2
   ctx.lineCap = 'round'
@@ -180,6 +213,18 @@ const handlePointerDown = (event: PointerEvent) => {
   }
   canvas.setPointerCapture(event.pointerId)
 
+  // 中键按住拖动：无论当前工具为何都进入平移
+  if (event.button === 1) {
+    event.preventDefault()
+    const rect = canvas.getBoundingClientRect()
+    const startX = event.clientX - rect.left
+    const startY = event.clientY - rect.top
+    isPanning.value = true
+    panStart.value = { x: startX, y: startY }
+    viewOffsetAtPanStart.value = { ...viewOffset.value }
+    return
+  }
+
   if (currentTool.value === 'pen') {
     if (penOnly.value && event.pointerType !== 'pen') return
     const point = getCanvasPoint(event)
@@ -200,18 +245,7 @@ const handlePointerDown = (event: PointerEvent) => {
 }
 
 const handlePointerMove = (event: PointerEvent) => {
-  if (currentTool.value === 'pen') {
-    if (!isDrawing.value) return
-    if (penOnly.value && event.pointerType !== 'pen') return
-
-    const point = getCanvasPoint(event)
-    if (!point) return
-
-    strokeManager.appendPoint(point)
-    drawLineTo(point)
-  } else if (currentTool.value === 'drag') {
-    if (!isPanning.value) return
-
+  if (isPanning.value) {
     const canvas = canvasRef.value
     if (!canvas || !panStart.value || !viewOffsetAtPanStart.value) return
 
@@ -228,6 +262,18 @@ const handlePointerMove = (event: PointerEvent) => {
     }
 
     resizeAndDraw()
+    return
+  }
+
+  if (currentTool.value === 'pen') {
+    if (!isDrawing.value) return
+    if (penOnly.value && event.pointerType !== 'pen') return
+
+    const point = getCanvasPoint(event)
+    if (!point) return
+
+    strokeManager.appendPoint(point)
+    drawLineTo(point)
   }
 }
 
@@ -267,13 +313,48 @@ const handlePointerCancel = (event: PointerEvent) => {
   endPointerInteraction()
 }
 
+const ZOOM_SENSITIVITY = 0.002
+
+const handleWheel = (event: WheelEvent) => {
+  const canvas = canvasRef.value
+  if (!canvas) return
+
+  event.preventDefault()
+
+  const rect = canvas.getBoundingClientRect()
+  const sx = event.clientX - rect.left
+  const sy = event.clientY - rect.top
+  const scale = viewScale.value
+  const newScale = Math.min(
+    MAX_SCALE,
+    Math.max(MIN_SCALE, scale * (1 - event.deltaY * ZOOM_SENSITIVITY)),
+  )
+  if (newScale === scale) return
+
+  const ratio = newScale / scale
+  viewOffset.value = {
+    x: sx - ratio * (sx - viewOffset.value.x),
+    y: sy - ratio * (sy - viewOffset.value.y),
+  }
+  viewScale.value = newScale
+  resizeAndDraw()
+}
+
 onMounted(() => {
   resizeAndDraw()
   window.addEventListener('resize', resizeAndDraw)
+  const canvas = canvasRef.value
+  if (canvas) {
+    canvas.addEventListener('wheel', handleWheel, { passive: false })
+  }
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeAndDraw)
+  const canvas = canvasRef.value
+  if (canvas) {
+    canvas.removeEventListener('wheel', handleWheel)
+  }
 })
 </script>
 
@@ -297,5 +378,16 @@ onBeforeUnmount(() => {
       @undo="handleUndo"
       @redo="handleRedo"
     />
+
+    <div
+      class="pointer-events-none fixed bottom-4 right-4 z-10 rounded-full px-3 py-1.5 text-sm tabular-nums backdrop-blur border"
+      :class="
+        isDark
+          ? 'bg-slate-900/70 border-white/20 text-slate-200'
+          : 'bg-white/70 border-slate-200/80 text-slate-700'
+      "
+    >
+      {{ scalePercent }}
+    </div>
   </div>
 </template>
