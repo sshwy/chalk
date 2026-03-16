@@ -27,7 +27,8 @@ export type StrokeAction =
   | { type: "clear" }
   | { type: "removeByIndexes"; indexes: number[]; clearRedo?: boolean }
   | { type: "undo" }
-  | { type: "redo" };
+  | { type: "redo" }
+  | { type: "initFromSerialized"; data: SerializedStrokeData };
 
 export type StrokeManagerEvent = "change";
 
@@ -146,6 +147,21 @@ export class StrokeManager {
     this.notifyChange();
   }
 
+  private initFromSerializedInternal(data: SerializedStrokeData): void {
+    if (!data || !Array.isArray(data.strokes)) {
+      this.clearInternal();
+      return;
+    }
+    this.strokes = data.strokes.map((stroke) => ({
+      points: stroke.points.map((p) => ({ x: p.x, y: p.y })),
+      width: stroke.width != null ? stroke.width : DEFAULT_STROKE_WIDTH,
+    }));
+    this.undoStack = [];
+    this.redoStack = [];
+    this.currentStroke = null;
+    this.notifyChange();
+  }
+
   update(action: StrokeAction): void {
     switch (action.type) {
       case "beginStroke":
@@ -171,6 +187,9 @@ export class StrokeManager {
         return;
       case "redo":
         this.redoInternal();
+        return;
+      case "initFromSerialized":
+        this.initFromSerializedInternal(action.data);
         return;
     }
   }
@@ -206,5 +225,58 @@ export class StrokeManager {
       width: stroke.width != null ? stroke.width : DEFAULT_STROKE_WIDTH,
     }));
     return manager;
+  }
+}
+
+/**
+ * 单次画板操作（将来用于多人协作时在网络间传输）。
+ *
+ * 当前阶段只在本地记录与回放，因此 id/userId 主要是为后续扩展预留。
+ */
+export type StrokeOp = {
+  /** 本次操作的唯一 id（例如 UUID 或自增序号字符串） */
+  id: string;
+  /** 发起该操作的用户 id（本地测试阶段可以写死为 "local"） */
+  userId: string;
+  /** 发生时间戳，毫秒 */
+  timestamp: number;
+  /** 实际在 StrokeManager 上要执行的动作 */
+  action: StrokeAction;
+};
+
+/**
+ * 将一条 StrokeOp 应用到指定 StrokeManager 上。
+ * 目前仅转发内部的 action，后续支持更多元数据时可在此集中处理。
+ */
+export function applyStrokeOp(manager: StrokeManager, op: StrokeOp): void {
+  manager.update(op.action);
+}
+
+/**
+ * 简单的操作日志容器，用于在本地记录一段绘制过程并回放到任意 StrokeManager。
+ */
+export class StrokeOpLog {
+  private ops: StrokeOp[] = [];
+
+  append(op: StrokeOp): void {
+    this.ops.push(op);
+  }
+
+  getAll(): readonly StrokeOp[] {
+    return this.ops;
+  }
+
+  clear(): void {
+    this.ops = [];
+  }
+
+  /**
+   * 依次把已经记录的操作应用到指定 StrokeManager。
+   * 典型用法：把一个画板上的操作回放到另一个空画板上，检查结果是否一致。
+   */
+  replayInto(manager: StrokeManager): void {
+    for (const op of this.ops) {
+      manager.update(op.action);
+    }
   }
 }
