@@ -515,7 +515,7 @@ onBeforeUnmount(() => {
     />
 
     <div
-      class="pointer-events-none select-none fixed bottom-4 right-4 z-10 rounded-full px-3 py-1.5 text-sm tabular-nums backdrop-blur border"
+      class="pointer-events-none select-none fixed bottom-4 right-4 z-10 rounded-full px-3 py-1.5 text-sm tabular-nums backdrop-blur-sm border"
       :class="
         isDark
           ? 'bg-slate-900/70 border-white/20 text-slate-200'

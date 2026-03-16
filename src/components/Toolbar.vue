@@ -85,7 +85,7 @@ const handleRedoClick = () => {
 <template>
   <div class="pointer-events-none fixed top-4 inset-x-0 flex justify-center z-10">
     <div
-      class="pointer-events-auto inline-flex items-center gap-2 rounded-full backdrop-blur shadow-lg px-3 py-2 transition-colors"
+      class="pointer-events-auto inline-flex items-center gap-2 rounded-full backdrop-blur-sm shadow-lg px-3 py-2 transition-colors"
       :class="props.mode === 'dark'
         ? 'bg-slate-900/70 border border-white/20'
         : 'bg-white/70 border border-slate-200/80'
@@ -105,7 +105,7 @@ const handleRedoClick = () => {
           :class="props.mode === 'dark' ? 'bg-slate-800 border-white/20' : 'bg-white border-slate-200'">
           <div class="flex flex-row items-center gap-3">
             <button v-for="w in PEN_WIDTH_OPTIONS" :key="w" type="button"
-              class="rounded-full flex-shrink-0 transition-[box-shadow,transform] hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-sky-500"
+              class="rounded-full shrink-0 transition-[box-shadow,transform] hover:scale-105 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-sky-500"
               :class="[
                 props.mode === 'dark' ? 'bg-slate-200' : 'bg-slate-600',
                 props.penWidth === w ? (props.mode === 'dark' ? 'ring-2 ring-sky-400 ring-offset-2 ring-offset-slate-800' : 'ring-2 ring-sky-500 ring-offset-2 ring-offset-white') : '',
@@ -126,7 +126,7 @@ const handleRedoClick = () => {
           :class="props.mode === 'dark' ? 'bg-slate-800 border-white/20' : 'bg-white border-slate-200'">
           <div class="flex flex-row items-center gap-3">
             <button v-for="size in BRUSH_SIZE_OPTIONS" :key="size" type="button"
-              class="rounded-full flex-shrink-0 transition-[box-shadow,transform] hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-sky-500"
+              class="rounded-full shrink-0 transition-[box-shadow,transform] hover:scale-105 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-sky-500"
               :class="[
                 props.mode === 'dark' ? 'bg-slate-200' : 'bg-slate-600',
                 props.brushRadius === size ? (props.mode === 'dark' ? 'ring-2 ring-sky-400 ring-offset-2 ring-offset-slate-800' : 'ring-2 ring-sky-500 ring-offset-2 ring-offset-white') : '',
