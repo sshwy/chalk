@@ -18,11 +18,11 @@
     "@types/node": "^24.10.1",
     "@vitejs/plugin-vue": "^6.0.2",
     "@vue/tsconfig": "^0.8.1",
-    "chalk-app": "file:./chalk-app",
+    "chalk-app": "file:chalk-app",
     "postcss": "^8.4.49",
     "tailwindcss": "^4.2.1",
     "typescript": "~5.9.3",
-    "vite": "^8.0.0-beta.13",
+    "vite": "^8.0.0",
     "vue-tsc": "^3.1.5"
   },
   "pnpm": {
