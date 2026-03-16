@@ -1,4 +1,4 @@
-import type { Point } from './strokes'
+import type { Point } from "./strokes";
 
 /**
  * 世界坐标系下可见矩形（用于网格绘制等）。
@@ -8,18 +8,13 @@ import type { Point } from './strokes'
  * @param offset 当前视图偏移（世界坐标 -> 屏幕坐标的平移量）
  * @param scale  当前缩放倍数
  */
-export function getVisibleWorldRect(
-  width: number,
-  height: number,
-  offset: Point,
-  scale: number,
-) {
+export function getVisibleWorldRect(width: number, height: number, offset: Point, scale: number) {
   return {
     left: -offset.x / scale,
     top: -offset.y / scale,
     right: (width - offset.x) / scale,
     bottom: (height - offset.y) / scale,
-  }
+  };
 }
 
 /**
@@ -38,20 +33,20 @@ export function screenToWorld(
   offset: Point,
   scale: number,
 ): Point {
-  const sx = clientX - rect.left
-  const sy = clientY - rect.top
+  const sx = clientX - rect.left;
+  const sy = clientY - rect.top;
   return {
     x: (sx - offset.x) / scale,
     y: (sy - offset.y) / scale,
-  }
+  };
 }
 
 const clamp = (value: number, min: number, max: number) =>
-  value < min ? min : value > max ? max : value
+  value < min ? min : value > max ? max : value;
 
 export interface ZoomAtPointResult {
-  scale: number
-  offset: Point
+  scale: number;
+  offset: Point;
 }
 
 /**
@@ -72,16 +67,15 @@ export function zoomAtPoint(
   maxScale: number,
   sensitivity: number,
 ): ZoomAtPointResult {
-  const target = scale * (1 - deltaY * sensitivity)
-  const newScale = clamp(target, minScale, maxScale)
+  const target = scale * (1 - deltaY * sensitivity);
+  const newScale = clamp(target, minScale, maxScale);
   if (newScale === scale) {
-    return { scale, offset }
+    return { scale, offset };
   }
-  const ratio = newScale / scale
+  const ratio = newScale / scale;
   const newOffset: Point = {
     x: sx - ratio * (sx - offset.x),
     y: sy - ratio * (sy - offset.y),
-  }
-  return { scale: newScale, offset: newOffset }
+  };
+  return { scale: newScale, offset: newOffset };
 }
-
