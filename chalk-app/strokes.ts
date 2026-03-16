@@ -20,6 +20,15 @@ function isRemoveEntry(e: UndoEntry): e is Extract<UndoEntry, { type: 'remove' }
   return e.type === 'remove'
 }
 
+export type StrokeAction =
+  | { type: 'beginStroke'; startPoint: Point; width?: number }
+  | { type: 'appendPoint'; point: Point }
+  | { type: 'endStroke' }
+  | { type: 'clear' }
+  | { type: 'removeByIndexes'; indexes: number[]; clearRedo?: boolean }
+  | { type: 'undo' }
+  | { type: 'redo' }
+
 export type StrokeManagerEvent = 'change'
 
 export class StrokeManager {
@@ -44,7 +53,7 @@ export class StrokeManager {
     }
   }
 
-  beginStroke(startPoint: Point, width: number = DEFAULT_STROKE_WIDTH): void {
+  private beginStrokeInternal(startPoint: Point, width: number = DEFAULT_STROKE_WIDTH): void {
     const stroke: Stroke = { points: [startPoint], width }
     this.strokes.push(stroke)
     this.currentStroke = stroke
@@ -52,12 +61,12 @@ export class StrokeManager {
     this.notifyChange()
   }
 
-  appendPoint(point: Point): void {
+  private appendPointInternal(point: Point): void {
     if (!this.currentStroke) return
     this.currentStroke.points.push(point)
   }
 
-  endStroke(): void {
+  private endStrokeInternal(): void {
     if (this.currentStroke) {
       this.undoStack.push({ type: 'add', stroke: this.currentStroke })
       this.currentStroke = null
@@ -65,7 +74,7 @@ export class StrokeManager {
     }
   }
 
-  clear(): void {
+  private clearInternal(): void {
     this.strokes = []
     this.undoStack = []
     this.redoStack = []
@@ -73,7 +82,7 @@ export class StrokeManager {
     this.notifyChange()
   }
 
-  removeStrokesByIndexes(indexes: number[], clearRedo = true): void {
+  private removeStrokesByIndexesInternal(indexes: number[], clearRedo = true): void {
     if (indexes.length === 0) return
     const sorted = [...new Set(indexes)].sort((a, b) => b - a)
     const removed: Stroke[] = []
@@ -95,7 +104,7 @@ export class StrokeManager {
     this.notifyChange()
   }
 
-  undo(): void {
+  private undoInternal(): void {
     const entry = this.undoStack.pop()
     if (!entry) return
     if (isRemoveEntry(entry)) {
@@ -117,7 +126,7 @@ export class StrokeManager {
     this.notifyChange()
   }
 
-  redo(): void {
+  private redoInternal(): void {
     const entry = this.redoStack.pop()
     if (!entry) return
     if (isRemoveEntry(entry)) {
@@ -135,6 +144,38 @@ export class StrokeManager {
     this.strokes.push(entry.stroke)
     this.undoStack.push(entry)
     this.notifyChange()
+  }
+
+  update(action: StrokeAction): void {
+    switch (action.type) {
+      case 'beginStroke':
+        this.beginStrokeInternal(
+          action.startPoint,
+          action.width != null ? action.width : DEFAULT_STROKE_WIDTH,
+        )
+        return
+      case 'appendPoint':
+        this.appendPointInternal(action.point)
+        return
+      case 'endStroke':
+        this.endStrokeInternal()
+        return
+      case 'clear':
+        this.clearInternal()
+        return
+      case 'removeByIndexes':
+        this.removeStrokesByIndexesInternal(
+          action.indexes,
+          action.clearRedo ?? true,
+        )
+        return
+      case 'undo':
+        this.undoInternal()
+        return
+      case 'redo':
+        this.redoInternal()
+        return
+    }
   }
 
   getStrokes(): readonly Stroke[] {

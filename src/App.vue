@@ -144,12 +144,12 @@ const onHistoryChange = () => {
 strokeManager.addEventListener('change', onHistoryChange)
 
 const handleUndo = () => {
-  strokeManager.undo()
+  strokeManager.update({ type: 'undo' })
   resizeAndDraw()
 }
 
 const handleRedo = () => {
-  strokeManager.redo()
+  strokeManager.update({ type: 'redo' })
   resizeAndDraw()
 }
 
@@ -226,7 +226,11 @@ const startBrushing = (point: Point): void => {
 
 const startDrawing = (point: Point): void => {
   isDrawing.value = true
-  strokeManager.beginStroke(point, penWidth.value)
+  strokeManager.update({
+    type: 'beginStroke',
+    startPoint: point,
+    width: penWidth.value,
+  })
   lastPoint.value = point
 }
 
@@ -251,7 +255,7 @@ const handleTouchPointerDown = (event: PointerEvent, point: Point, canvas: HTMLC
   const wasDrawing = isDrawing.value
   endPointerInteraction()
   if (wasDrawing) {
-    strokeManager.undo()
+    strokeManager.update({ type: 'undo' })
     resizeAndDraw()
   }
   beginPinchFromTouchPoints()
@@ -332,7 +336,7 @@ const handlePenDrawingMove = (event: PointerEvent): boolean => {
   const point = getCanvasPoint(event)
   if (!point) return true
 
-  strokeManager.appendPoint(point)
+  strokeManager.update({ type: 'appendPoint', point })
   drawLineTo(point)
   return true
 }
@@ -386,7 +390,9 @@ const handlePointerMove = (event: PointerEvent) => {
 const endPointerInteraction = () => {
   if (isBrushing.value) {
     const indexes = [...pendingDeleteIndexes.value].sort((a, b) => b - a)
-    if (indexes.length) strokeManager.removeStrokesByIndexes(indexes)
+    if (indexes.length) {
+      strokeManager.update({ type: 'removeByIndexes', indexes })
+    }
     isBrushing.value = false
     brushCenter.value = null
     pendingDeleteIndexes.value = new Set()
@@ -396,7 +402,7 @@ const endPointerInteraction = () => {
   if (isDrawing.value) {
     isDrawing.value = false
     lastPoint.value = null
-    strokeManager.endStroke()
+    strokeManager.update({ type: 'endStroke' })
   }
 
   isPanning.value = false
